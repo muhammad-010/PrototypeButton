@@ -1,308 +1,155 @@
-<!doctype html>
-<html lang="id">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Sirine & Bicara</title>
-  <link rel="preload" as="audio" href="assets/sirine.mp3" type="audio/mpeg" fetchpriority="high" />
-  <style>
-    :root{
-      --bg:#0d0d0d; --txt:#fff;
-      --red:#ff1a1a; --red-dark:#d90000;
-      --blue:#00aaff; --blue-dark:#0085cc;
-      --page-pad: clamp(16px, 5vw, 48px);
-      --stack-gap: clamp(12px, 3vh, 28px);
-      --btn-block: clamp(72px, 18vh, 160px);
-      --btn-text: clamp(1.05rem, 4.8vw, 1.6rem);
-      --card:#121212; --card-bd:#242424;
-      --ok:#24d160; --warn:#ffbb33;
-    }
-    *{ box-sizing:border-box }
-    html,body{ height:100% }
-    body{
-      margin:0; background:var(--bg); color:var(--txt);
-      display:grid; place-items:center;
-      padding:
-        max(var(--page-pad), env(safe-area-inset-top))
-        max(var(--page-pad), env(safe-area-inset-right))
-        max(var(--page-pad), env(safe-area-inset-bottom))
-        max(var(--page-pad), env(safe-area-inset-left));
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Control System</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
 
-    .wrap{
-      width:100%; max-width:860px;
-      display:flex; flex-direction:column; align-items:center; gap: var(--stack-gap);
-      padding-inline: clamp(12px, 6vw, 48px);
-    }
+        .button {
+            width: 80%;
+            max-width: 300px;
+            height: 100px;
+            margin: 20px;
+            border: none;
+            border-radius: 15px;
+            font-size: 1.2em;
+            font-weight: bold;
+            color: white;
+            cursor: pointer;
+            transition: transform 0.1s;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
 
-    .btn{
-      appearance:none; border:0; outline:0; cursor:pointer; -webkit-tap-highlight-color:transparent; user-select:none;
-      touch-action: manipulation; color:#fff; text-transform:uppercase; font-weight:900; letter-spacing:.5px;
-      border-radius:999px; width:100%; height: var(--btn-block); font-size: var(--btn-text);
-      margin-block: calc(var(--stack-gap) * 0.25);
-      box-shadow:0 10px 28px rgba(0,0,0,.35), 0 0 0 4px rgba(255,255,255,.05) inset;
-      transition: transform .02s, filter .06s, box-shadow .2s, background .12s;
-    }
-    .btn:active{ transform: translateY(1px) scale(.99); filter: brightness(.97); }
-    .btn:focus-visible{ box-shadow:0 0 0 6px rgba(255,255,255,.25), 0 12px 28px rgba(0,0,0,.55); }
-    #btnSiren{ background:linear-gradient(180deg, var(--red), var(--red-dark)); }
-    #btnSiren[data-on="true"]{ background:linear-gradient(180deg, #cc0000, #a80000); box-shadow:0 12px 30px rgba(255,0,0,.45), 0 0 0 6px rgba(255,255,255,.08) inset; }
-    #btnTalk{  background:linear-gradient(180deg, var(--blue), var(--blue-dark)); }
-    #btnTalk[data-on="true"]{  background:linear-gradient(180deg, #008fd6, #006aa3); box-shadow:0 12px 30px rgba(0,170,255,.45), 0 0 0 6px rgba(255,255,255,.08) inset; }
+        .button:active {
+            transform: scale(0.95);
+        }
 
-    .card{
-      width:100%; background:var(--card); border:1px solid var(--card-bd);
-      border-radius:14px; padding:14px 16px; display:flex; flex-direction:column; gap:10px;
-    }
-    .row{ display:flex; flex-direction:column; gap:10px; }
-    label{ font-size:.95rem; opacity:.9; }
-    select, button.small{
-      width:100%; max-width:100%; padding:10px 12px; border-radius:10px; border:1px solid #333;
-      background:#161616; color:#fff; outline:none; font-size:.95rem;
-    }
-    button.small{
-      border-color:#2a2a2a; background:#1c1c1c; cursor:pointer; text-transform:none; font-weight:600;
-    }
-    .bar{ display:flex; flex-direction:column; gap:10px; }
-    .hint{ opacity:.8; font-size:.9rem; }
-    .ok{ color:var(--ok); }
-    .warn{ color:var(--warn); }
+        #sirenButton {
+            background-color: #ff4444;
+        }
 
-    /* Mic level meter */
-    .meter{
-      height:10px; width:100%; background:#1a1a1a; border-radius:999px; overflow:hidden; border:1px solid #2a2a2a;
-    }
-    .meter > span{
-      display:block; height:100%; width:0%;
-      background: linear-gradient(90deg, #3ec36b, #ffd166, #ff5e57);
-      transition: width .06s linear;
-    }
-  </style>
+        #micButton {
+            background-color: #44aa44;
+        }
+
+        #micButton.active {
+            background-color: #ff6b6b;
+        }
+
+        .status {
+            margin-top: 20px;
+            font-size: 1em;
+            color: #333;
+        }
+    </style>
 </head>
 <body>
-  <div class="wrap">
-    <button id="btnSiren" class="btn" aria-pressed="false">Sirine: MATI</button>
-    <button id="btnTalk"  class="btn" aria-pressed="false">Bicara: OFF</button>
+    <button id="sirenButton" class="button">Play Siren</button>
+    <button id="micButton" class="button">Start Microphone</button>
+    <div id="status" class="status"></div>
 
-    <!-- Simplified: only a status line when using automatic input/output -->
-    <div id="status" class="hint" style="margin-top:12px; opacity:.9">Status: siap — tekan tombol untuk memulai</div>
-  </div>
-
-  <!-- Sirine -->
-  <audio id="siren" preload="auto" playsinline src="assets/sirine.mp3"></audio>
-  <!-- Monitor mic (membantu Safari/Android) -->
-  <audio id="monitor" autoplay playsinline style="position:absolute; opacity:0; pointer-events:none;"></audio>
-  <script>
-  (function(){
-    // MediaElementAudioSourceNode untuk sirine
-    let sirenElSrc;
-    const btnSiren = document.getElementById('btnSiren');
-    const btnTalk  = document.getElementById('btnTalk');
-    const sirenEl  = document.getElementById('siren');
-    const monitorEl= document.getElementById('monitor');
-    const statusEl = document.getElementById('status');
-
-    // ---------- Sirine ----------
-    window.addEventListener('load', () => { try { sirenEl.load(); } catch {} });
-    sirenEl.loop = true;
-    let sirenOn = false;
-
-    async function toggleSiren(){
-      try{
-        await ensureCtxAndGraph();
-        if (audioCtx.state === 'suspended') await audioCtx.resume();
-
-        if (!sirenOn){
-          if (sirenEl.readyState < 2) sirenEl.load();
-          sirenEl.currentTime = 0;
-          sirenEl.volume = 1;
-          await sirenEl.play();            // sekarang suaranya lewat graph WebAudio
-          sirenOn = true;
-          btnSiren.dataset.on = "true";
-          btnSiren.setAttribute('aria-pressed','true');
-          btnSiren.textContent = 'Sirine: MENYALA';
-        } else {
-          sirenEl.pause();
-          sirenEl.currentTime = 0;
-          sirenOn = false;
-          btnSiren.dataset.on = "false";
-          btnSiren.setAttribute('aria-pressed','false');
-          btnSiren.textContent = 'Sirine: MATI';
-        }
-      }catch(e){
-        console.error('Siren error:', e);
-        btnSiren.textContent = 'Periksa assets/sirine.mp3';
-      }
-    }
-
-    // Unlock kebijakan media (tanpa bunyi)
-    document.addEventListener('pointerdown', () => {
-      try{ sirenEl.muted = true; sirenEl.play().then(()=>{sirenEl.pause();sirenEl.currentTime=0;sirenEl.muted=false;}).catch(()=>{});}catch{}
-    }, { once:true, passive:true, capture:true });
-
-    btnSiren.addEventListener('pointerdown', e => { e.preventDefault(); toggleSiren(); }, {passive:false});
-
-  // ---------- Mic monitor ----------
-    let audioCtx, micStream, micSource, gateGain, dryGain, wetGain, outGain, convolver, mediaDest, analyser, rafId;
-    let talkOn = false;
-    let selectedMicId = null;
-
-    function makeReverbIR(ctx, seconds=2.2, decay=2.6){
-      const rate = ctx.sampleRate, len = Math.max(1, Math.floor(rate*seconds));
-      const ir = ctx.createBuffer(2, len, rate);
-      for(let ch=0; ch<2; ch++){
-        const data = ir.getChannelData(ch);
-        for(let i=0;i<len;i++){ const t=i/len; data[i]=(Math.random()*2-1)*Math.pow(1-t,decay); }
-      }
-      return ir;
-    }
-
-    async function ensureCtxAndGraph(){
-      if (!audioCtx){
-        const AC = window.AudioContext || window.webkitAudioContext;
-        audioCtx = new AC({ latencyHint: "interactive" });
-      }
-      if (!gateGain){
-        gateGain = audioCtx.createGain(); gateGain.gain.value = 0;
-        dryGain  = audioCtx.createGain(); dryGain.gain.value = 0.90;
-        wetGain  = audioCtx.createGain(); wetGain.gain.value = 0.45;
-        outGain  = audioCtx.createGain(); outGain.gain.value = 1.0;
-  convolver= audioCtx.createConvolver(); convolver.buffer = makeReverbIR(audioCtx, 2.4, 2.6);
-
-  // Rangkaian mic
-  // (micSource akan diset saat startMicWithDevice)
-  gateGain.connect(dryGain);     dryGain.connect(outGain);
-  gateGain.connect(convolver);   convolver.connect(wetGain); wetGain.connect(outGain);
-
-  // Analyser untuk meter level mic (jika ingin menampilkan meter)
-  analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 2048;
-  analyser.smoothingTimeConstant = 0.25;
-  try{ gateGain.connect(analyser); }catch(e){ console.warn('Analyser connect failed', e); }
-
-  // Output ke speaker + monitor <audio>
-  outGain.connect(audioCtx.destination);
-  mediaDest = audioCtx.createMediaStreamDestination();
-  outGain.connect(mediaDest);
-  monitorEl.srcObject = mediaDest.stream;
-  monitorEl.autoplay = true; monitorEl.playsInline = true; monitorEl.muted = false;
-      }
-
-      // Sambungkan elemen <audio id="siren"> ke graph WebAudio jika belum
-      if (!sirenElSrc){
-        try{
-          sirenElSrc = audioCtx.createMediaElementSource(sirenEl);
-          sirenElSrc.connect(outGain);
-        }catch(e){ console.warn('createMediaElementSource failed:', e); }
-      }
-    }
-
-    function stopMicStream(){
-      if (micStream){
-        micStream.getTracks().forEach(t => t.stop());
-        micStream = null;
-      }
-      if (micSource){
-        try{ micSource.disconnect(); }catch{}
-        micSource = null;
-      }
-    }
-
-    // FIX: definisi fungsi async yang benar (placeholder)
-    async function reconnectMic() {
-      // dummy to allow naming before usage if needed
-    }
-
-    async function startMicWithDevice(deviceId){
-      await ensureCtxAndGraph();
-      // hentikan yang lama
-      stopMicStream();
-      // bikin yang baru
-      const constraints = {
-        audio:{
-          deviceId: deviceId ? { exact: deviceId } : undefined,
-          echoCancellation:false, noiseSuppression:false, autoGainControl:false, channelCount:1
-        }
-      };
-      micStream = await navigator.mediaDevices.getUserMedia(constraints);
-      micSource = audioCtx.createMediaStreamSource(micStream);
-      micSource.connect(gateGain);
-      statusEl.textContent = 'Status: mic aktif (default)';
-      // update meter loop
-      if (rafId) cancelAnimationFrame(rafId);
-      // only run visual meter loop if analyser exists and a visual element is present
-      if (analyser){
-        const data = new Uint8Array(analyser.fftSize);
-        const loop = () => {
-          analyser.getByteTimeDomainData(data);
-          let sum = 0;
-          for (let i=0;i<data.length;i++){ const v = (data[i]-128)/128; sum += v*v; }
-          const rms = Math.sqrt(sum / data.length);
-          const pct = Math.min(100, Math.max(0, Math.round(rms*140)));
-          // if meterFill exists, update it
-          const mf = document.getElementById('meterFill');
-          if (mf) mf.style.width = pct + '%';
-          rafId = requestAnimationFrame(loop);
-        };
-        loop();
-      }
-    }
-
-    function setGate(on){
-      if (!audioCtx || !gateGain) return;
-      const now = audioCtx.currentTime;
-      gateGain.gain.cancelScheduledValues(now);
-      gateGain.gain.setTargetAtTime(on?1:0, now, 0.012);
-      btnTalk.dataset.on = on ? "true" : "false";
-      btnTalk.setAttribute('aria-pressed', on ? 'true' : 'false');
-      btnTalk.textContent = on ? 'Bicara: ON' : 'Bicara: OFF';
-    }
-
-    async function toggleTalk(){
-      try{
-        await ensureCtxAndGraph();
-        if (audioCtx.state === 'suspended') await audioCtx.resume();
-        if (!talkOn){
-          // Jika belum ada stream mic, coba mulai dengan device terpilih
-          if (!micStream) {
-            try{
-              // request mic permission and start default mic
-              statusEl.textContent = 'Status: meminta izin mic…';
-              await startMicWithDevice(null);
-            }catch(e){
-              console.error('Tidak bisa mulai mic:', e);
-              statusEl.innerHTML = `<span class="warn">Gagal membuka mic. Pastikan izinkan mikrofon di browser.</span>`;
-              return;
+    <script>
+        let audioContext;
+        let micStream;
+        let isMicActive = false;
+        const sirenButton = document.getElementById('sirenButton');
+        const micButton = document.getElementById('micButton');
+        const statusDiv = document.getElementById('status');
+        const sirenAudio = new Audio('assets/sirine.mp3');
+        
+        // Initialize audio context on user interaction
+        function initAudioContext() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
             }
-          }
-          try { await monitorEl.play(); }catch(e){ console.warn('monitor play failed', e); }
-          setGate(true);
-          talkOn = true;
-        } else {
-          setGate(false);
-          talkOn = false;
         }
-      }catch(e){
-        console.error('Talk error:', e);
-        statusEl.innerHTML = `<span class="warn">Izin mic ditolak atau error. Cek permission.</span>`;
-      }
-    }
 
-  // Support pointerdown and click gestures to satisfy different Android/Browser behaviors
-  btnTalk.addEventListener('pointerdown', e => { e.preventDefault(); toggleTalk(); }, {passive:false});
-  btnTalk.addEventListener('click', e => { e.preventDefault(); toggleTalk(); }, {passive:false});
+        // Siren button functionality
+        sirenButton.addEventListener('click', () => {
+            initAudioContext();
+            if (sirenAudio.paused) {
+                sirenAudio.play().catch(error => {
+                    statusDiv.textContent = 'Error playing siren: ' + error.message;
+                });
+                sirenButton.textContent = 'Stop Siren';
+            } else {
+                sirenAudio.pause();
+                sirenAudio.currentTime = 0;
+                sirenButton.textContent = 'Play Siren';
+            }
+        });
 
-    // Matikan mic saat tab disembunyikan
-    document.addEventListener('visibilitychange', ()=>{
-      if (document.hidden && talkOn){
-        setGate(false);
-        talkOn = false;
-      }
-    });
+        // Microphone button functionality
+        micButton.addEventListener('click', async () => {
+            initAudioContext();
+            
+            if (!isMicActive) {
+                try {
+                    // Specifically request the built-in microphone
+                    const constraints = {
+                        audio: {
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false,
+                            deviceId: 'default' // This ensures we use the default/built-in microphone
+                        }
+                    };
 
-    // Simplified: automatic input/output selection. We request mic when the user taps "Bicara".
-  })();
-  </script>
+                    micStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    
+                    // Create audio source from microphone stream
+                    const source = audioContext.createMediaStreamSource(micStream);
+                    
+                    // Connect directly to audio output
+                    source.connect(audioContext.destination);
+                    
+                    isMicActive = true;
+                    micButton.textContent = 'Stop Microphone';
+                    micButton.classList.add('active');
+                    statusDiv.textContent = 'Microphone is active';
+                    
+                } catch (error) {
+                    statusDiv.textContent = 'Error accessing microphone: ' + error.message;
+                }
+            } else {
+                // Stop microphone
+                if (micStream) {
+                    micStream.getTracks().forEach(track => track.stop());
+                }
+                isMicActive = false;
+                micButton.textContent = 'Start Microphone';
+                micButton.classList.remove('active');
+                statusDiv.textContent = 'Microphone is inactive';
+            }
+        });
+
+        // Handle page visibility change
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                // Stop everything when page is hidden
+                if (micStream) {
+                    micStream.getTracks().forEach(track => track.stop());
+                }
+                sirenAudio.pause();
+                sirenAudio.currentTime = 0;
+                isMicActive = false;
+                micButton.textContent = 'Start Microphone';
+                micButton.classList.remove('active');
+                sirenButton.textContent = 'Play Siren';
+                statusDiv.textContent = 'Audio stopped due to page becoming inactive';
+            }
+        });
+    </script>
 </body>
 </html>
