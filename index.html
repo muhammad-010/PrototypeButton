@@ -85,31 +85,8 @@
     <button id="btnSiren" class="btn" aria-pressed="false">Sirine: MATI</button>
     <button id="btnTalk"  class="btn" aria-pressed="false">Bicara: OFF</button>
 
-    <div class="card">
-      <div class="row">
-        <label for="permBtn">1) Izin mikrofon</label>
-        <button id="permBtn" class="small">Izinkan Akses Mic</button>
-        <div class="hint">Wajib tekan ini di HP agar daftar perangkat <span class="ok">terbaca & berlabel</span>.</div>
-      </div>
-
-      <div class="row">
-        <label for="micSelect">2) Pilih Input Mic</label>
-        <select id="micSelect" disabled>
-          <option>Mic belum terdeteksi — beri izin dulu</option>
-        </select>
-        <button id="refreshBtn" class="small">Muat Ulang Daftar Mic</button>
-        <div class="meter" title="Level mic"><span id="meterFill"></span></div>
-        <div id="micStatus" class="hint">Status: menunggu izin…</div>
-      </div>
-
-      <div class="row">
-        <label for="sinkSelect">3) Pilih Output Speaker (opsional)</label>
-        <select id="sinkSelect" disabled>
-          <option>Browser tidak mendukung memilih output atau butuh izin</option>
-        </select>
-        <div class="hint">Untuk Bluetooth, pilih speaker di sini (jika Chrome mendukung <code>setSinkId</code>).</div>
-      </div>
-    </div>
+    <!-- Simplified: only a status line when using automatic input/output -->
+    <div id="status" class="hint" style="margin-top:12px; opacity:.9">Status: siap — tekan tombol untuk memulai</div>
   </div>
 
   <!-- Sirine -->
@@ -118,19 +95,13 @@
   <audio id="monitor" autoplay playsinline style="position:absolute; opacity:0; pointer-events:none;"></audio>
   <script>
   (function(){
-    // MediaElementAudioSourceNode untuk sirine (dideklarasi di sini, bukan di luar <script>)
+    // MediaElementAudioSourceNode untuk sirine
     let sirenElSrc;
     const btnSiren = document.getElementById('btnSiren');
     const btnTalk  = document.getElementById('btnTalk');
     const sirenEl  = document.getElementById('siren');
     const monitorEl= document.getElementById('monitor');
-
-    const permBtn  = document.getElementById('permBtn');
-    const micSel   = document.getElementById('micSelect');
-    const sinkSel  = document.getElementById('sinkSelect');
-    const refreshBtn = document.getElementById('refreshBtn');
-    const meterFill = document.getElementById('meterFill');
-    const micStatus = document.getElementById('micStatus');
+    const statusEl = document.getElementById('status');
 
     // ---------- Sirine ----------
     window.addEventListener('load', () => { try { sirenEl.load(); } catch {} });
@@ -172,7 +143,7 @@
 
     btnSiren.addEventListener('pointerdown', e => { e.preventDefault(); toggleSiren(); }, {passive:false});
 
-    // ---------- Mic monitor ----------
+  // ---------- Mic monitor ----------
     let audioCtx, micStream, micSource, gateGain, dryGain, wetGain, outGain, convolver, mediaDest, analyser, rafId;
     let talkOn = false;
     let selectedMicId = null;
@@ -204,11 +175,10 @@
   gateGain.connect(dryGain);     dryGain.connect(outGain);
   gateGain.connect(convolver);   convolver.connect(wetGain); wetGain.connect(outGain);
 
-  // Analyser untuk meter level mic (diperlukan oleh startMicWithDevice)
+  // Analyser untuk meter level mic (jika ingin menampilkan meter)
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.25;
-  // tambahkan tap ke gateGain sehingga kita dapat membaca sinyal tanpa mengubah jalur utama
   try{ gateGain.connect(analyser); }catch(e){ console.warn('Analyser connect failed', e); }
 
   // Output ke speaker + monitor <audio>
@@ -219,10 +189,12 @@
   monitorEl.autoplay = true; monitorEl.playsInline = true; monitorEl.muted = false;
       }
 
-      // >>> NEW: sambungkan elemen <audio id="siren"> ke graph yang sama
+      // Sambungkan elemen <audio id="siren"> ke graph WebAudio jika belum
       if (!sirenElSrc){
-        sirenElSrc = audioCtx.createMediaElementSource(sirenEl);
-        sirenElSrc.connect(outGain);
+        try{
+          sirenElSrc = audioCtx.createMediaElementSource(sirenEl);
+          sirenElSrc.connect(outGain);
+        }catch(e){ console.warn('createMediaElementSource failed:', e); }
       }
     }
 
@@ -256,21 +228,25 @@
       micStream = await navigator.mediaDevices.getUserMedia(constraints);
       micSource = audioCtx.createMediaStreamSource(micStream);
       micSource.connect(gateGain);
-      micStatus.innerHTML = `Mic aktif: <span class="ok">${(micSel.selectedOptions[0]?.textContent)||'Default'}</span>`;
+      statusEl.textContent = 'Status: mic aktif (default)';
       // update meter loop
       if (rafId) cancelAnimationFrame(rafId);
-      const data = new Uint8Array(analyser.fftSize);
-      const loop = () => {
-        analyser.getByteTimeDomainData(data);
-        // hitung puncak (RMS sederhana)
-        let sum = 0;
-        for (let i=0;i<data.length;i++){ const v = (data[i]-128)/128; sum += v*v; }
-        const rms = Math.sqrt(sum / data.length); // 0..1
-        const pct = Math.min(100, Math.max(0, Math.round(rms*140))); // boost sedikit
-        meterFill.style.width = pct + '%';
-        rafId = requestAnimationFrame(loop);
-      };
-      loop();
+      // only run visual meter loop if analyser exists and a visual element is present
+      if (analyser){
+        const data = new Uint8Array(analyser.fftSize);
+        const loop = () => {
+          analyser.getByteTimeDomainData(data);
+          let sum = 0;
+          for (let i=0;i<data.length;i++){ const v = (data[i]-128)/128; sum += v*v; }
+          const rms = Math.sqrt(sum / data.length);
+          const pct = Math.min(100, Math.max(0, Math.round(rms*140)));
+          // if meterFill exists, update it
+          const mf = document.getElementById('meterFill');
+          if (mf) mf.style.width = pct + '%';
+          rafId = requestAnimationFrame(loop);
+        };
+        loop();
+      }
     }
 
     function setGate(on){
@@ -291,14 +267,16 @@
           // Jika belum ada stream mic, coba mulai dengan device terpilih
           if (!micStream) {
             try{
-              await startMicWithDevice(selectedMicId);
+              // request mic permission and start default mic
+              statusEl.textContent = 'Status: meminta izin mic…';
+              await startMicWithDevice(null);
             }catch(e){
               console.error('Tidak bisa mulai mic:', e);
-              micStatus.innerHTML = `<span class="warn">Gagal membuka mic. Coba pilih device lain atau beri izin.</span>`;
+              statusEl.innerHTML = `<span class="warn">Gagal membuka mic. Pastikan izinkan mikrofon di browser.</span>`;
               return;
             }
           }
-          try { await monitorEl.play(); } catch {}
+          try { await monitorEl.play(); }catch(e){ console.warn('monitor play failed', e); }
           setGate(true);
           talkOn = true;
         } else {
@@ -307,11 +285,13 @@
         }
       }catch(e){
         console.error('Talk error:', e);
-        btnTalk.textContent = 'Izin mic ditolak? Cek permission.';
+        statusEl.innerHTML = `<span class="warn">Izin mic ditolak atau error. Cek permission.</span>`;
       }
     }
 
-    btnTalk.addEventListener('pointerdown', e => { e.preventDefault(); toggleTalk(); }, {passive:false});
+  // Support pointerdown and click gestures to satisfy different Android/Browser behaviors
+  btnTalk.addEventListener('pointerdown', e => { e.preventDefault(); toggleTalk(); }, {passive:false});
+  btnTalk.addEventListener('click', e => { e.preventDefault(); toggleTalk(); }, {passive:false});
 
     // Matikan mic saat tab disembunyikan
     document.addEventListener('visibilitychange', ()=>{
@@ -321,109 +301,7 @@
       }
     });
 
-    // ---------- Permission & device lists ----------
-    async function requestMicPermission(){
-      try{
-        // panggil getUserMedia singkat untuk membuka izin & memberi label device
-        const s = await navigator.mediaDevices.getUserMedia({audio:true});
-        s.getTracks().forEach(t => t.stop());
-        micStatus.textContent = 'Izin mic diberikan.';
-      }catch(e){
-        micStatus.innerHTML = `<span class="warn">Izin mic ditolak. Buka ikon kunci/URL bar → izinkan mikrofon.</span>`;
-        throw e;
-      }
-    }
-
-    async function populateMicInputs(){
-      if (!navigator.mediaDevices?.enumerateDevices) {
-        micSel.disabled = true;
-        micSel.innerHTML = '<option>Browser tidak mendukung enumerateDevices</option>';
-        return;
-      }
-      const devs = await navigator.mediaDevices.enumerateDevices();
-      const inputs = devs.filter(d => d.kind === 'audioinput');
-      if (!inputs.length){
-        micSel.disabled = true;
-        micSel.innerHTML = '<option>Tidak ada audioinput terdeteksi</option>';
-        return;
-      }
-      micSel.disabled = false;
-      micSel.innerHTML = inputs.map(d => {
-        const label = d.label || 'Mikrofon';
-        return `<option value="${d.deviceId}">${label}</option>`;
-      }).join('');
-      // pilih sebelumnya jika ada
-      if (selectedMicId){
-        const opt = [...micSel.options].find(o => o.value === selectedMicId);
-        if (opt) micSel.value = selectedMicId;
-      } else {
-        selectedMicId = micSel.value;
-      }
-    }
-
-    async function populateSinks(){
-      if (!('sinkId' in HTMLMediaElement.prototype)) {
-        sinkSel.disabled = true;
-        sinkSel.innerHTML = '<option>Browser tidak mendukung memilih output</option>';
-        return;
-      }
-      try{ await navigator.mediaDevices.getUserMedia({audio:true}); }catch{}
-      const devs = await navigator.mediaDevices.enumerateDevices();
-      const outs = devs.filter(d => d.kind === 'audiooutput');
-      if (!outs.length){ sinkSel.disabled = true; sinkSel.innerHTML = '<option>Tidak ada audiooutput</option>'; return; }
-      sinkSel.disabled = false;
-      sinkSel.innerHTML = outs.map(d => `<option value="${d.deviceId}">${d.label || 'Speaker'}</option>`).join('');
-    }
-
-    async function applySink(deviceId){
-      if (!('setSinkId' in HTMLMediaElement.prototype)) return;
-      try{
-        await monitorEl.setSinkId(deviceId);
-      }catch(e){
-        console.warn('setSinkId gagal:', e);
-      }
-    }
-
-    // Events
-    permBtn.addEventListener('click', async ()=>{
-      try{
-        await requestMicPermission();
-        await populateMicInputs();
-        await populateSinks();
-        micStatus.innerHTML = 'Izin mic diberikan. Pilih input lalu klik <b>Bicara</b>.';
-      }catch{}
-    });
-
-    refreshBtn.addEventListener('click', async ()=>{
-      await populateMicInputs();
-      await populateSinks();
-    });
-
-    micSel.addEventListener('change', async ()=>{
-      selectedMicId = micSel.value || null;
-      // Jika sedang ON, pindah langsung ke mic baru
-      if (talkOn){
-        try{
-          await startMicWithDevice(selectedMicId);
-          // pastikan gate tetap ON
-          setGate(true);
-        }catch(e){
-          console.error('Gagal switch mic:', e);
-          micStatus.innerHTML = `<span class="warn">Tidak bisa membuka mic terpilih. Coba device lain.</span>`;
-        }
-      }
-    });
-
-    sinkSel.addEventListener('change', async ()=>{ await applySink(sinkSel.value); });
-
-    navigator.mediaDevices?.addEventListener?.('devicechange', async ()=>{
-      await populateMicInputs();
-      await populateSinks();
-    });
-
-    // Init lists (label mungkin kosong sampai izin diberikan)
-    populateMicInputs();
-    populateSinks();
+    // Simplified: automatic input/output selection. We request mic when the user taps "Bicara".
   })();
   </script>
 </body>
