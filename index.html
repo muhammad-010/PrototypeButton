@@ -64,7 +64,9 @@
         let micStream;
         let mediaStreamSource;
         let gainNode;
+        let audioElement;
         let isMicActive = false;
+        let keepAliveInterval;
         const sirenButton = document.getElementById('sirenButton');
         const micButton = document.getElementById('micButton');
         const statusDiv = document.getElementById('status');
@@ -95,6 +97,7 @@
         // Siren button functionality
         sirenButton.addEventListener('click', async () => {
             if (sirenAudio.paused) {
+                await initAudioContext(); // Ensure audio context is initialized
                 sirenAudio.play().catch(error => {
                     updateDebugInfo('Error playing siren: ' + error.message);
                 });
@@ -105,6 +108,25 @@
                 sirenButton.textContent = 'Play Siren';
             }
         });
+
+        // Keep audio alive function
+        function startKeepAlive() {
+            if (keepAliveInterval) {
+                clearInterval(keepAliveInterval);
+            }
+            keepAliveInterval = setInterval(async () => {
+                if (audioContext && audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                if (audioElement && audioElement.paused) {
+                    try {
+                        await audioElement.play();
+                    } catch (e) {
+                        console.log('Keep-alive play error:', e);
+                    }
+                }
+            }, 500);
+        }
 
         // Setup audio processing chain
         async function setupAudioChain(stream) {
@@ -123,17 +145,19 @@
                 
                 // Connect the audio chain
                 mediaStreamSource.connect(gainNode);
-                gainNode.connect(destination);
+                gainNode.connect(audioContext.destination); // Direct connection to output
                 
-                // Create a new audio element with the processed stream
-                const audioElement = new Audio();
-                audioElement.srcObject = destination.stream;
-                audioElement.play().catch(e => updateDebugInfo('Play Error: ' + e.message));
+                // Create and configure audio element
+                audioElement = new Audio();
+                audioElement.srcObject = stream;
+                audioElement.autoplay = true;
+                audioElement.muted = true; // Mute to prevent feedback
+                await audioElement.play();
                 
-                return audioElement;
+                return true;
             } catch (error) {
                 updateDebugInfo('Audio Chain Error: ' + error.message);
-                return null;
+                return false;
             }
         }
 
@@ -143,19 +167,16 @@
                 try {
                     updateDebugInfo('Requesting microphone access...');
                     
-                    // List available devices first
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    const audioInputs = devices.filter(device => device.kind === 'audioinput');
-                    console.log('Available audio inputs:', audioInputs);
-                    
                     // Request microphone with specific constraints for mobile
                     const constraints = {
                         audio: {
-                            echoCancellation: false,
-                            noiseSuppression: false,
-                            autoGainControl: false,
+                            echoCancellation: true, // Enable echo cancellation for better mobile performance
+                            noiseSuppression: true, // Enable noise suppression for better mobile performance
+                            autoGainControl: true,  // Enable auto gain for better mobile performance
                             latency: 0,
-                            channelCount: 1
+                            channelCount: 1,
+                            sampleRate: 48000,
+                            sampleSize: 16
                         }
                     };
 
@@ -163,46 +184,62 @@
                     micStream = await navigator.mediaDevices.getUserMedia(constraints);
                     updateDebugInfo('Microphone access granted. Setting up audio...');
 
-                    // Setup audio processing chain
-                    const audioElement = await setupAudioChain(micStream);
-                    if (!audioElement) {
+                    // Setup audio chain
+                    if (!(await setupAudioChain(micStream))) {
                         throw new Error('Failed to setup audio chain');
                     }
 
-                    // Force audio playback through media channel
-                    audioElement.setSinkId ? 
-                        audioElement.setSinkId('default').catch(e => console.log('setSinkId error:', e)) :
-                        console.log('setSinkId not supported');
+                    // Start keep-alive mechanism
+                    startKeepAlive();
 
                     isMicActive = true;
                     micButton.textContent = 'Stop Microphone';
                     micButton.classList.add('active');
-                    updateDebugInfo('Microphone active - audio should be playing through speaker');
+                    updateDebugInfo('Microphone active - audio should be playing');
 
                 } catch (error) {
                     console.error('Setup error:', error);
                     updateDebugInfo('Error: ' + error.message);
-                    stopMicrophone();
+                    await stopMicrophone();
                 }
             } else {
-                stopMicrophone();
+                await stopMicrophone();
             }
         });
 
         // Function to stop microphone and cleanup
-        function stopMicrophone() {
+        async function stopMicrophone() {
+            if (keepAliveInterval) {
+                clearInterval(keepAliveInterval);
+                keepAliveInterval = null;
+            }
+
+            if (audioElement) {
+                audioElement.pause();
+                audioElement.srcObject = null;
+                audioElement = null;
+            }
+
             if (micStream) {
                 micStream.getTracks().forEach(track => {
                     track.stop();
                     updateDebugInfo('Stopping track: ' + track.label);
                 });
             }
+
             if (mediaStreamSource) {
                 mediaStreamSource.disconnect();
             }
+
             if (gainNode) {
                 gainNode.disconnect();
             }
+
+            if (audioContext) {
+                await audioContext.close();
+                audioContext = null;
+            }
+
             isMicActive = false;
             micButton.textContent = 'Start Microphone';
             micButton.classList.remove('active');
@@ -211,25 +248,14 @@
 
         // Handle page visibility change
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden && isMicActive) {
-                stopMicrophone();
-            }
-        });
-
-        // Handle page visibility change
-        document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                // Stop everything when page is hidden
                 if (micStream) {
-                    micStream.getTracks().forEach(track => track.stop());
+                    stopMicrophone();
                 }
                 sirenAudio.pause();
                 sirenAudio.currentTime = 0;
-                isMicActive = false;
-                micButton.textContent = 'Start Microphone';
-                micButton.classList.remove('active');
                 sirenButton.textContent = 'Play Siren';
-                statusDiv.textContent = 'Audio stopped due to page becoming inactive';
+                updateDebugInfo('Audio stopped due to page becoming inactive');
             }
         });
     </script>
