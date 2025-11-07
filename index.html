@@ -62,31 +62,28 @@
     <script>
         let audioContext;
         let micStream;
-        let mediaStreamSource;
-        let gainNode;
+        let audioElement;
         let isMicActive = false;
         const sirenButton = document.getElementById('sirenButton');
         const micButton = document.getElementById('micButton');
         const statusDiv = document.getElementById('status');
         const sirenAudio = new Audio('assets/sirine.mp3');
-        
-        // Initialize audio context on user interaction
-        async function initAudioContext() {
-            if (!audioContext) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                // Resume audio context on mobile devices
-                if (audioContext.state === 'suspended') {
-                    await audioContext.resume();
-                }
-            }
+
+        // Debug info display
+        function updateDebugInfo(message) {
+            console.log(message);
+            statusDiv.textContent = message;
         }
 
+        // Check if we're on a mobile device
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        updateDebugInfo('Device type: ' + (isMobile ? 'Mobile' : 'Desktop'));
+
         // Siren button functionality
-        sirenButton.addEventListener('click', async () => {
-            await initAudioContext();
+        sirenButton.addEventListener('click', () => {
             if (sirenAudio.paused) {
                 sirenAudio.play().catch(error => {
-                    statusDiv.textContent = 'Error playing siren: ' + error.message;
+                    updateDebugInfo('Error playing siren: ' + error.message);
                 });
                 sirenButton.textContent = 'Stop Siren';
             } else {
@@ -96,75 +93,74 @@
             }
         });
 
-        // Function to list available audio devices
-        async function listAudioDevices() {
-            try {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const audioInputs = devices.filter(device => device.kind === 'audioinput');
-                console.log('Available audio inputs:', audioInputs);
-                return audioInputs;
-            } catch (error) {
-                console.error('Error listing audio devices:', error);
-                return [];
+        // Create audio element for mic output
+        function createAudioElement() {
+            if (!audioElement) {
+                audioElement = new Audio();
+                audioElement.controls = false;
+                audioElement.autoplay = true;
+                document.body.appendChild(audioElement);
             }
         }
 
         // Microphone button functionality
         micButton.addEventListener('click', async () => {
-            await initAudioContext();
-            
             if (!isMicActive) {
                 try {
-                    // List available devices first
-                    const audioInputs = await listAudioDevices();
+                    updateDebugInfo('Requesting microphone access...');
                     
-                    // Try to find the built-in microphone
+                    // List available devices
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const audioInputs = devices.filter(device => device.kind === 'audioinput');
+                    console.log('Available audio inputs:', audioInputs);
+
+                    // Request microphone access with specific constraints
                     const constraints = {
                         audio: {
                             echoCancellation: false,
                             noiseSuppression: false,
-                            autoGainControl: false
+                            autoGainControl: false,
+                            latency: 0,
+                            channelCount: 1,
+                            sampleRate: 48000,
+                            sampleSize: 16
                         }
                     };
 
-                    // Get user media stream
                     micStream = await navigator.mediaDevices.getUserMedia(constraints);
-                    
-                    // Create and configure audio nodes
-                    mediaStreamSource = audioContext.createMediaStreamSource(micStream);
-                    gainNode = audioContext.createGain();
-                    gainNode.gain.value = 1.0; // Adjust this value if needed
-                    
-                    // Connect the audio graph
-                    mediaStreamSource.connect(gainNode);
-                    gainNode.connect(audioContext.destination);
-                    
+                    updateDebugInfo('Microphone access granted. Setting up audio...');
+
+                    // Create audio element if it doesn't exist
+                    createAudioElement();
+
+                    // Connect microphone to audio element
+                    audioElement.srcObject = micStream;
+                    await audioElement.play();
+
                     isMicActive = true;
                     micButton.textContent = 'Stop Microphone';
                     micButton.classList.add('active');
-                    statusDiv.textContent = 'Microphone is active - Check your volume controls';
-                    
+                    updateDebugInfo('Microphone is active and streaming');
+
                 } catch (error) {
-                    console.error('Detailed error:', error);
-                    statusDiv.textContent = 'Error accessing microphone: ' + error.message;
+                    console.error('Microphone error:', error);
+                    updateDebugInfo('Error: ' + error.message);
                 }
             } else {
-                // Stop microphone and clean up
+                // Stop everything
                 if (micStream) {
                     micStream.getTracks().forEach(track => {
                         track.stop();
+                        updateDebugInfo('Stopping track: ' + track.label);
                     });
                 }
-                if (mediaStreamSource) {
-                    mediaStreamSource.disconnect();
-                }
-                if (gainNode) {
-                    gainNode.disconnect();
+                if (audioElement) {
+                    audioElement.srcObject = null;
                 }
                 isMicActive = false;
                 micButton.textContent = 'Start Microphone';
                 micButton.classList.remove('active');
-                statusDiv.textContent = 'Microphone is inactive';
+                updateDebugInfo('Microphone stopped');
             }
         });
 
