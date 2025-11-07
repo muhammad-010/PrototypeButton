@@ -60,20 +60,15 @@
     <div id="status" class="status"></div>
 
     <script>
+        let audioContext;
+        let micStream;
+        let mediaStreamSource;
+        let gainNode;
+        let isMicActive = false;
         const sirenButton = document.getElementById('sirenButton');
         const micButton = document.getElementById('micButton');
         const statusDiv = document.getElementById('status');
         const sirenAudio = new Audio('assets/sirine.mp3');
-        
-        // Audio elements for mic routing
-        const dummyAudio = new Audio();
-        dummyAudio.loop = true;
-        const micAudio = new Audio();
-        micAudio.loop = true;
-        
-        let micStream = null;
-        let isMicActive = false;
-        let mediaRecorder = null;
 
         // Debug info display
         function updateDebugInfo(message) {
@@ -81,23 +76,24 @@
             statusDiv.textContent = message;
         }
 
-        // Force media audio mode by playing silent audio
-        async function forceSpeakerOutput() {
+        // Initialize audio context
+        async function initAudioContext() {
             try {
-                // Create and play silent audio to force media mode
-                const silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
-                silentAudio.loop = true;
-                await silentAudio.play();
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
                 return true;
-            } catch (e) {
-                console.log('Silent audio error:', e);
+            } catch (error) {
+                updateDebugInfo('Audio Context Error: ' + error.message);
                 return false;
             }
         }
 
         // Siren button functionality
         sirenButton.addEventListener('click', async () => {
-            await forceSpeakerOutput(); // Force speaker mode before playing
             if (sirenAudio.paused) {
                 sirenAudio.play().catch(error => {
                     updateDebugInfo('Error playing siren: ' + error.message);
@@ -110,99 +106,110 @@
             }
         });
 
+        // Setup audio processing chain
+        async function setupAudioChain(stream) {
+            if (!await initAudioContext()) return null;
+
+            try {
+                // Create source from microphone stream
+                mediaStreamSource = audioContext.createMediaStreamSource(stream);
+                
+                // Create gain node for volume control
+                gainNode = audioContext.createGain();
+                gainNode.gain.value = 2.0; // Increased gain
+                
+                // Create media stream destination to route back to speakers
+                const destination = audioContext.createMediaStreamDestination();
+                
+                // Connect the audio chain
+                mediaStreamSource.connect(gainNode);
+                gainNode.connect(destination);
+                
+                // Create a new audio element with the processed stream
+                const audioElement = new Audio();
+                audioElement.srcObject = destination.stream;
+                audioElement.play().catch(e => updateDebugInfo('Play Error: ' + e.message));
+                
+                return audioElement;
+            } catch (error) {
+                updateDebugInfo('Audio Chain Error: ' + error.message);
+                return null;
+            }
+        }
+
         // Microphone button functionality
         micButton.addEventListener('click', async () => {
             if (!isMicActive) {
                 try {
-                    // Force speaker mode first
-                    await forceSpeakerOutput();
-                    
                     updateDebugInfo('Requesting microphone access...');
                     
-                    // Get microphone stream with specific constraints for media routing
-                    micStream = await navigator.mediaDevices.getUserMedia({
+                    // List available devices first
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const audioInputs = devices.filter(device => device.kind === 'audioinput');
+                    console.log('Available audio inputs:', audioInputs);
+                    
+                    // Request microphone with specific constraints for mobile
+                    const constraints = {
                         audio: {
-                            // Disable all processing to prevent call mode
                             echoCancellation: false,
                             noiseSuppression: false,
                             autoGainControl: false,
-                            // Chrome-specific constraints
-                            googEchoCancellation: false,
-                            googAutoGainControl: false,
-                            googNoiseSuppression: false,
-                            googHighpassFilter: false,
-                            // Attempt to force communication mode off
-                            channelCount: 2, // Stereo to force media mode
-                            latency: 0
-                        }
-                    });
-
-                    // List audio devices for debugging
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    console.log('Audio devices:', devices.filter(d => d.kind === 'audioinput' || d.kind === 'audiooutput'));
-
-                    // Create MediaRecorder to process the stream
-                    mediaRecorder = new MediaRecorder(micStream, {
-                        mimeType: 'audio/webm;codecs=opus',
-                        audioBitsPerSecond: 128000
-                    });
-
-                    // Handle the data from MediaRecorder
-                    mediaRecorder.ondataavailable = async (event) => {
-                        if (event.data.size > 0 && micAudio) {
-                            const audioURL = URL.createObjectURL(event.data);
-                            micAudio.src = audioURL;
-                            try {
-                                await micAudio.play();
-                                URL.revokeObjectURL(audioURL);
-                            } catch (e) {
-                                console.error('Audio play error:', e);
-                            }
+                            latency: 0,
+                            channelCount: 1
                         }
                     };
 
-                    // Start recording with very small time slices for low latency
-                    mediaRecorder.start(50);
+                    // Get microphone stream
+                    micStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    updateDebugInfo('Microphone access granted. Setting up audio...');
+
+                    // Setup audio processing chain
+                    const audioElement = await setupAudioChain(micStream);
+                    if (!audioElement) {
+                        throw new Error('Failed to setup audio chain');
+                    }
+
+                    // Force audio playback through media channel
+                    audioElement.setSinkId ? 
+                        audioElement.setSinkId('default').catch(e => console.log('setSinkId error:', e)) :
+                        console.log('setSinkId not supported');
 
                     isMicActive = true;
                     micButton.textContent = 'Stop Microphone';
                     micButton.classList.add('active');
-                    updateDebugInfo('Microphone active - Audio routing through media channel');
+                    updateDebugInfo('Microphone active - audio should be playing through speaker');
 
                 } catch (error) {
                     console.error('Setup error:', error);
                     updateDebugInfo('Error: ' + error.message);
-                    await stopMicrophone();
+                    stopMicrophone();
                 }
             } else {
-                await stopMicrophone();
+                stopMicrophone();
             }
         });
 
-        // Stop microphone function
-        async function stopMicrophone() {
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-            }
-            
+        // Function to stop microphone and cleanup
+        function stopMicrophone() {
             if (micStream) {
-                micStream.getTracks().forEach(track => track.stop());
+                micStream.getTracks().forEach(track => {
+                    track.stop();
+                    updateDebugInfo('Stopping track: ' + track.label);
+                });
             }
-            
-            if (micAudio) {
-                micAudio.pause();
-                micAudio.src = '';
+            if (mediaStreamSource) {
+                mediaStreamSource.disconnect();
             }
-            
-            micStream = null;
-            mediaRecorder = null;
+            if (gainNode) {
+                gainNode.disconnect();
+            }
             isMicActive = false;
             micButton.textContent = 'Start Microphone';
             micButton.classList.remove('active');
             updateDebugInfo('Microphone stopped');
         }
 
-        // Clean up on page hide
+        // Handle page visibility change
         document.addEventListener('visibilitychange', () => {
             if (document.hidden && isMicActive) {
                 stopMicrophone();
