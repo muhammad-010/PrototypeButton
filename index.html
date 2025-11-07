@@ -116,10 +116,10 @@
   <audio id="siren" preload="auto" playsinline src="assets/sirine.mp3"></audio>
   <!-- Monitor mic (membantu Safari/Android) -->
   <audio id="monitor" autoplay playsinline style="position:absolute; opacity:0; pointer-events:none;"></audio>
-
-  let sirenElSrc; //MediaElementAudioSourceNode untuk sirine
   <script>
   (function(){
+    // MediaElementAudioSourceNode untuk sirine (dideklarasi di sini, bukan di luar <script>)
+    let sirenElSrc;
     const btnSiren = document.getElementById('btnSiren');
     const btnTalk  = document.getElementById('btnTalk');
     const sirenEl  = document.getElementById('siren');
@@ -197,19 +197,26 @@
         dryGain  = audioCtx.createGain(); dryGain.gain.value = 0.90;
         wetGain  = audioCtx.createGain(); wetGain.gain.value = 0.45;
         outGain  = audioCtx.createGain(); outGain.gain.value = 1.0;
-        convolver= audioCtx.createConvolver(); convolver.buffer = makeReverbIR(audioCtx, 2.4, 2.6);
+  convolver= audioCtx.createConvolver(); convolver.buffer = makeReverbIR(audioCtx, 2.4, 2.6);
 
-        // Rangkaian mic
-        // (micSource akan diset saat startMicWithDevice)
-        gateGain.connect(dryGain);     dryGain.connect(outGain);
-        gateGain.connect(convolver);   convolver.connect(wetGain); wetGain.connect(outGain);
+  // Rangkaian mic
+  // (micSource akan diset saat startMicWithDevice)
+  gateGain.connect(dryGain);     dryGain.connect(outGain);
+  gateGain.connect(convolver);   convolver.connect(wetGain); wetGain.connect(outGain);
 
-        // Output ke speaker + monitor <audio>
-        outGain.connect(audioCtx.destination);
-        mediaDest = audioCtx.createMediaStreamDestination();
-        outGain.connect(mediaDest);
-        monitorEl.srcObject = mediaDest.stream;
-        monitorEl.autoplay = true; monitorEl.playsInline = true; monitorEl.muted = false;
+  // Analyser untuk meter level mic (diperlukan oleh startMicWithDevice)
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.25;
+  // tambahkan tap ke gateGain sehingga kita dapat membaca sinyal tanpa mengubah jalur utama
+  try{ gateGain.connect(analyser); }catch(e){ console.warn('Analyser connect failed', e); }
+
+  // Output ke speaker + monitor <audio>
+  outGain.connect(audioCtx.destination);
+  mediaDest = audioCtx.createMediaStreamDestination();
+  outGain.connect(mediaDest);
+  monitorEl.srcObject = mediaDest.stream;
+  monitorEl.autoplay = true; monitorEl.playsInline = true; monitorEl.muted = false;
       }
 
       // >>> NEW: sambungkan elemen <audio id="siren"> ke graph yang sama
