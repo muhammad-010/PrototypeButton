@@ -3,8 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Tombol Sirine</title>
+  <title>Tombol Sirine + Push-to-Talk</title>
+
+  <!-- Preload sirine (ganti path jika perlu) -->
   <link rel="preload" as="audio" href="assets/sirine.mp3" type="audio/mpeg" fetchpriority="high" />
+
   <style>
     :root{ --red:#ff1a1a; --red-dark:#e00000; --bg:#0d0d0d; --txt:#fff; }
     *{ box-sizing:border-box }
@@ -18,79 +21,179 @@
               max(24px, env(safe-area-inset-left));
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
     }
-    .wrap{ width:100%; max-width:680px; display:flex; justify-content:center; align-items:center; }
+    .wrap{ width:100%; max-width:680px; display:flex; flex-direction:column; align-items:center; }
     #sirenBtn{
       appearance:none; border:0; outline:0; cursor:pointer; -webkit-tap-highlight-color:transparent; user-select:none;
+      touch-action: manipulation;
       background:linear-gradient(180deg,var(--red),var(--red-dark)); color:#fff; text-transform:uppercase;
       font-weight:900; letter-spacing:.5px; border-radius:999px;
       box-shadow:0 10px 28px rgba(255,0,0,.45), 0 0 0 4px rgba(255,255,255,.05) inset;
-      width:clamp(240px,88vw,240px); height:clamp(72px,18vh,160px);
+      width:clamp(240px,88vw,560px); height:clamp(72px,18vh,160px);
       font-size:clamp(1.25rem,6vw,2rem); padding:0 28px; margin:6vh 6vw;
       transition:transform .02s ease, filter .02s ease, box-shadow .2s ease;
     }
     #sirenBtn:active{ transform:translateY(1px) scale(.99); filter:brightness(.95);
       box-shadow:0 6px 16px rgba(255,0,0,.35), 0 0 0 2px rgba(255,255,255,.06) inset; }
-    #sirenBtn:focus-visible{ box-shadow:0 0 0 4px rgba(255,255,255,.25), 0 10px 24px rgba(255,0,0,.55); }
+    #sirenBtn[aria-pressed="true"]{ box-shadow:0 0 0 6px rgba(255,255,255,.25), 0 12px 28px rgba(255,0,0,.65); }
+    .hint{ opacity:.8; font-size:.9rem; margin-top:-8px; text-align:center; line-height:1.35; }
     .sr-only{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
       clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; border:0; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <button id="sirenBtn" aria-pressed="false" aria-describedby="hint">Sirine</button>
-    <span id="hint" class="sr-only">Menekan tombol akan memulai suara sirine.</span>
+    <button id="sirenBtn" aria-pressed="false" aria-describedby="hint">Aktifkan Sirine</button>
+    <div id="hint" class="hint">Tap cepat = Sirine · Tahan = Bicara (mic + reverb)</div>
   </div>
 
-  <!-- Pakai src langsung (lebih stabil di iOS) -->
-  <audio id="sirenAudio" preload="auto" playsinline crossorigin="anonymous" src="assets/sirine.mp3"></audio>
+  <!-- Sirine (ganti src jika perlu) -->
+  <audio id="sirenAudio" preload="auto" playsinline src="assets/sirine.mp3"></audio>
 
   <script>
-    (function () {
-      const btn = document.getElementById('sirenBtn');
-      const audio = document.getElementById('sirenAudio');
+    (function(){
+      const btn   = document.getElementById('sirenBtn');
+      const siren = document.getElementById('sirenAudio');
 
-      // Siapkan sejak awal
-      window.addEventListener('load', () => {
-        try { audio.load(); } catch {}
-      });
+      // -------- Sirine: preload & instant play --------
+      window.addEventListener('load', () => { try { siren.load(); } catch {} });
 
-      // UNLOCK: pastikan audio diizinkan & decoded sebelum tombol handler jalan.
-      let unlocked = false;
-      const unlock = () => {
-        if (unlocked) return;
-        // Coba play lalu pause secepatnya untuk "meng-unlock" tanpa bunyi
-        audio.play().then(() => {
-          audio.pause();
-          audio.currentTime = 0;
-          unlocked = true;
-        }).catch(() => {
-          // Abaikan; di beberapa browser akan sukses ketika tombol ditekan
-        });
-      };
-      // Pakai capture agar ini dieksekusi sebelum handler tombol
-      document.addEventListener('pointerdown', unlock, { once:true, passive:true, capture:true });
+      // -------- AudioContext & Push-to-Talk (mic->speaker + reverb) --------
+      let audioCtx, micStream, micSource, gateGain, dryGain, wetGain, outGain, convolver;
+      let holding = false;
+      const HOLD_MS = 250; // < 250ms = tap (sirine), >= 250ms = tahan (mic)
+      let holdTimer = null;
 
-      // Main handler: respons instan saat ditekan
-      const startSiren = async () => {
-        try {
-          // audio.loop = true; // buka jika ingin berulang
-          if (audio.readyState < 2) audio.load();
-          audio.currentTime = 0;
-          await audio.play();
-          btn.setAttribute('aria-pressed', 'true');
-        } catch (e) {
-          console.error('Audio play error:', e, 'readyState:', audio.readyState, 'networkState:', audio.networkState, 'error:', audio.error);
-          btn.textContent = 'Audio gagal diputar. Cek path & format (assets/sirine.mp3)';
+      // Generate simple reverb IR (stereo noise decay)
+      function makeReverbIR(ctx, seconds=2.2, decay=2.8){
+        const rate = ctx.sampleRate;
+        const length = Math.max(1, Math.floor(rate * seconds));
+        const ir = ctx.createBuffer(2, length, rate);
+        for(let ch=0; ch<2; ch++){
+          const data = ir.getChannelData(ch);
+          for(let i=0; i<length; i++){
+            const t = i / length;
+            data[i] = (Math.random()*2 - 1) * Math.pow(1 - t, decay);
+          }
         }
+        return ir;
+      }
+
+      async function ensureAudioGraph(){
+        if (!audioCtx){
+          const AC = window.AudioContext || window.webkitAudioContext;
+          audioCtx = new AC();
+
+          // Nodes
+          gateGain = audioCtx.createGain();  // gate mic on/off
+          gateGain.gain.value = 0;           // start muted
+          dryGain  = audioCtx.createGain();  dryGain.gain.value = 0.85;
+          wetGain  = audioCtx.createGain();  wetGain.gain.value = 0.45;
+          outGain  = audioCtx.createGain();  outGain.gain.value = 1.0;
+          convolver = audioCtx.createConvolver();
+          convolver.buffer = makeReverbIR(audioCtx, 2.4, 2.6);
+
+          // Wire graph after we get micSource
+          outGain.connect(audioCtx.destination);
+        }
+        if (!micStream){
+          // Minta akses mic (matikan AGC/NS/EC agar efek reverb bersih)
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+          });
+          micSource = audioCtx.createMediaStreamSource(micStream);
+
+          // mic -> gate -> (dry + wet) -> out
+          micSource.connect(gateGain);
+          // dry
+          gateGain.connect(dryGain);  dryGain.connect(outGain);
+          // wet (reverb)
+          gateGain.connect(convolver); convolver.connect(wetGain); wetGain.connect(outGain);
+        }
+      }
+
+      function gateMic(on){
+        if (!audioCtx) return;
+        const now = audioCtx.currentTime;
+        // ramp halus biar tak "pop"
+        gateGain.gain.cancelScheduledValues(now);
+        gateGain.gain.setTargetAtTime(on ? 1 : 0, now, 0.015);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.textContent = on ? 'BICARA… (lepas untuk berhenti)' : 'Aktifkan Sirine';
+      }
+
+      // ------ Handlers: tap vs hold ------
+      async function handleTap(){
+        try{
+          if (siren.readyState < 2) siren.load();
+          siren.currentTime = 0;
+          await siren.play();
+        }catch(e){
+          console.error('Play siren error:', e);
+        }
+      }
+
+      async function handleHoldStart(){
+        try{
+          await ensureAudioGraph();
+          if (audioCtx.state === 'suspended') await audioCtx.resume();
+          gateMic(true);
+        }catch(e){
+          console.error('Mic start error:', e);
+          // Jika permission ditolak, fallback ke sirine saja
+          await handleTap();
+        }
+      }
+
+      function handleHoldEnd(){
+        if (holding){
+          gateMic(false);
+          holding = false;
+        }
+      }
+
+      // Unlock audio policies (Safari/iOS)
+      const globalUnlock = () => {
+        // coba nudge siren tanpa bunyi
+        siren.muted = true;
+        siren.play().then(()=>{ siren.pause(); siren.currentTime = 0; siren.muted = false; }).catch(()=>{});
+        document.removeEventListener('pointerdown', globalUnlock, {capture:true});
       };
+      document.addEventListener('pointerdown', globalUnlock, { once:true, passive:true, capture:true });
 
-      btn.addEventListener('pointerdown', startSiren, { passive:true });
+      // Pointer logic: deteksi hold
+      btn.addEventListener('pointerdown', (e)=>{
+        e.preventDefault();
+        holding = false;
+        clearTimeout(holdTimer);
+        holdTimer = setTimeout(async ()=>{
+          holding = true;
+          await handleHoldStart();
+        }, HOLD_MS);
+      }, { passive:false });
 
-      // Aksesibilitas keyboard
-      btn.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+      const endEvents = ['pointerup','pointercancel','pointerleave'];
+      endEvents.forEach(ev => btn.addEventListener(ev, async ()=>{
+        clearTimeout(holdTimer);
+        if (holding) {
+          handleHoldEnd();
+        } else {
+          // dianggap tap cepat
+          await handleTap();
+        }
+      }));
+
+      // Keyboard (desktop)
+      btn.addEventListener('keydown', (e)=>{
+        if (e.key === ' ' || e.key === 'Enter'){
           e.preventDefault();
-          startSiren();
+          // tekan = hold, lepas = end
+          holding = true;
+          handleHoldStart();
+        }
+      });
+      btn.addEventListener('keyup', (e)=>{
+        if (e.key === ' ' || e.key === 'Enter'){
+          handleHoldEnd();
         }
       });
     })();
